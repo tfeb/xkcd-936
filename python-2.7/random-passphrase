@@ -69,7 +69,7 @@ import os
 import os.path as path
 import random
 import string
-import optparse                 # 2.6
+import argparse
 import json
 
 # The whole Unicode thing is a hopeless mess in Python 2: one thing
@@ -97,54 +97,53 @@ verbose = False
 
 def main():
     """The program"""
-    parser = optparse.OptionParser(usage="%prog [options] [length]")
-    parser.add_option("-c", "--config-file",
-                      dest="config",
-                      help="read JSON config file CONFIG")
-    parser.add_option("-d", "--dump-config",
-                      action="store_true", dest="dump",
-                      help="dump effective JSON config (no passphrase made)")
-    parser.add_option("-s", "--sequence",
-                      action="store_true", dest="sequence",
-                      help="use a listy config for a concatenated passphrase")
-    parser.add_option("-v", "--verbose",
-                      action="store_true", dest="verbose",
-                      help="be verbose, reporting some statistics")
-    parser.add_option("-m", "--man",
-                      action="store_true", dest="pydoc",
-                      help="use pydoc to display the documentation")
+    parser = argparse.ArgumentParser(usage="%(prog)s [options] [length]")
+    parser.add_argument("-c", "--config-file",
+                        dest="config",
+                        help="read JSON config file CONFIG")
+    parser.add_argument(
+        "-d", "--dump-config",
+        action="store_true", dest="dump",
+        help="just dump effective JSON config (no passphrase made)")
+    parser.add_argument(
+        "-s", "--sequence",
+        action="store_true", dest="sequence",
+        help="use a listy config to make a concatenated passphrase")
+    parser.add_argument("-v", "--verbose",
+                        action="store_true", dest="verbose",
+                        help="be verbose, reporting some statistics")
+    parser.add_argument("-m", "--man",
+                        action="store_true", dest="pydoc",
+                        help="use pydoc to display the documentation")
+    parser.add_argument("length", nargs="?", type=int, default=None,
+                        help="length, default {0}".format(default_length))
 
-    (options, positionals) = parser.parse_args()
-    if options.pydoc:
+    args = parser.parse_args()
+    if args.pydoc:
         pydoc = "pydoc{0}.{1}".format(sys.version_info[0], sys.version_info[1])
         os.execlp(pydoc, pydoc, sys.argv[0])
     global verbose
-    verbose = options.verbose
+    verbose = args.verbose
 
     try:
-        if not options.sequence:
+        if not args.sequence:
             # the standard case
-            length = (int(positionals[0])
-                      if len(positionals) >= 1
-                      else None)
-            if len(positionals) > 1:
-                warn("extra arguments dropped")
-            if length != None and length < 0:
+            if args.length != None and args.length < 0:
                 raise Exception("negative creep")
-            config = settings(options.config, length)
-            if not options.dump:
+            config = settings(args.config, args.length)
+            if not args.dump:
                 print random_passphrase(**config)
             else:
                 dump_settings(config)
         else:
             # the hairy case: there must be a config and it must
             # specify a sequence of configs, including their lengths.
-            if not options.config:
+            if not args.config:
                 raise Exception("no config given for concatenated passphrase")
-            if len(positionals) > 0:
+            if args.length is not None:
                 warn("ignoring arguments")
-            config = json_settings(options.config, sequence=True)
-            if not options.dump:
+            config = json_settings(args.config, sequence=True)
+            if not args.dump:
                 print(u" ".join([random_passphrase(**c) for c in config]))
             else:
                 dump_settings(config)
