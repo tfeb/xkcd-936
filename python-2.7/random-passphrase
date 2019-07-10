@@ -18,7 +18,7 @@ or
 
     random-passphrase n
 
-where n is the length required, the default being 8 words.
+where n is the length required, the default being 4 words.
 
 By default words are selected from the wordlists found in
 `/usr/share/dict/words` and `/usr/dict/words`, at least one of which
@@ -89,7 +89,7 @@ default_likelihoods = {
 
 default_requirements = dict([(n, 1) for n in default_sources.keys()])
 
-default_length = 8
+default_length = 4
 
 default_maxchars = None
 
