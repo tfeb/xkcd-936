@@ -116,7 +116,8 @@ def main():
 
     (options, positionals) = parser.parse_args()
     if options.pydoc:
-        os.execlp("pydoc", "pydoc", sys.argv[0])
+        pydoc = "pydoc{0}.{1}".format(sys.version_info[0], sys.version_info[1])
+        os.execlp(pydoc, pydoc, sys.argv[0])
     global verbose
     verbose = options.verbose
 
