@@ -1,0 +1,5 @@
+# Ignore the converted files
+# THIS MUST BE DELETED WHEN PYTHON 3 IS THE DEFAULT
+#
+random-password
+random-passphrase

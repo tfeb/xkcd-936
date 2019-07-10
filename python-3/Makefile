@@ -21,12 +21,14 @@ TWO		= 2.7
 TWOTOTHREE	= 2to3-$(TWO)
 TWODIR		= ../python-$(TWO)
 
-.PHONY: install clean
+.PHONY: install convert clean
 
 install: $(TOOLS)
 	mkdir -p $(BIN)
 	install -C -m 555 $? $(BIN)
 	rm -f $(TOOLS)
+
+convert: $(TOOLS)
 
 clean:
 	rm -f $(TOOLS)
