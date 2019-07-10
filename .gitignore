@@ -1,0 +1,7 @@
+# Ignore emacs backups & auto save files
+*~
+\#*\#
+.\#*
+
+# Ignore Python compiled files
+*.pyc
