@@ -1,0 +1,444 @@
+#!/usr/bin/env python2.7
+# File             - random-passphrase
+# Description      - make a random passphrase, using real OS randomness.
+# Author           - Tim Bradshaw (tfb at tfeb.org)
+# Created On       - Mon Sep 14 17:23:36 2015
+# Status           - Unknown
+#
+# $Format:(@:%H)$
+#
+
+"""Random passphrases from OS randonmess and word lists
+
+Simple use is
+
+    random-passphrase
+
+or
+
+    random-passphrase n
+
+where n is the length required, the default being 8 words.
+
+By default words are selected from the wordlists found in
+`/usr/share/dict/words` and `/usr/dict/words`, at least one of which
+should exist.
+
+You can also give a configuration file (in JSON) via `-c` which lets
+you override the sources of words, the likelihoods of words each
+source being used, the number of words from each source required and
+the default total number of words.  This needs to be documented but
+isn't currently.  `-d` will dump the effective configuration as JSON
+and is useful to understand what is needed in a configuration file.
+
+If you want to be even more clever, the `-s` argument causes it to
+read a (mandatory) condfiguration file (specified with `-c` as above)
+which contains a sequence of specifications, and the resulting
+password will be the ordered concatenation of a sequence of passwords
+meeting each specification.  The specifications must include the
+lengths of the concatenated chunks, and you can't override these on
+the command line (because I was too lazy to implememt it).
+
+Wordlist files are read line-by-line and split on whitespace to yield
+a list of words. By default a set of unique words from each source is
+then accumulated, so the statistics of words in passphrases don't
+reflect those in the sources.  This can be turned off in configuration
+files, but be careful if you do so, as it makes passphrases easier to
+guess.  `-v` will cause it to report some statistics from the various sources
+
+The program detects if you give it requirements it can't meet (with
+the default configuration this is a passphrase of less than a single
+word).  Even if it can meet the requirements it could in theory fail
+to terminate: it does not (and can not) detect that.
+
+This uses Python's `random.SystemRandom` class, and in particular its
+`randint(min, max)` method: it is not clear how good this is.  If you
+set things up so that passwords can contain only two different
+characters and generate long ones they seem to be strongly biased to
+one value in some cases.  This may be a bug in this code of course.
+
+This program is closely related to `random-password` and should
+probably be the same program: it isn't because I was too lazy to
+conditionalize some of the checks.
+
+subcision monovariant Acephala retecious
+"""
+
+import sys
+import os
+import os.path as path
+import random
+import string
+import optparse                 # 2.6
+import json
+
+# The whole Unicode thing is a hopeless mess in Python 2: one thing
+# that seems to be true is that Unicode strings have the same hashes
+# as plain strings, but this is clearly enormously encodding-dependent
+# and I'm not going to rely on it.
+
+default_sources = {
+    u"words": [u"/usr/share/dict/words",
+               u"/usr/dict/words"]}
+
+default_uniqueness = {
+    u"words": True}
+
+default_likelihoods = {
+    u"words": 1}
+
+default_requirements = dict([(n, 1) for n in default_sources.keys()])
+
+default_length = 8
+
+default_maxchars = None
+
+verbose = False
+
+def main():
+    """The program"""
+    parser = optparse.OptionParser(usage="%prog [options] [length]")
+    parser.add_option("-c", "--config-file",
+                      dest="config",
+                      help="read JSON config file CONFIG")
+    parser.add_option("-d", "--dump-config",
+                      action="store_true", dest="dump",
+                      help="dump effective JSON config (no passphrase made)")
+    parser.add_option("-s", "--sequence",
+                      action="store_true", dest="sequence",
+                      help="use a listy config for a concatenated passphrase")
+    parser.add_option("-v", "--verbose",
+                      action="store_true", dest="verbose",
+                      help="be verbose, reporting some statistics")
+    parser.add_option("-m", "--man",
+                      action="store_true", dest="pydoc",
+                      help="use pydoc to display the documentation")
+
+    (options, positionals) = parser.parse_args()
+    if options.pydoc:
+        os.execlp("pydoc", "pydoc", sys.argv[0])
+    global verbose
+    verbose = options.verbose
+
+    try:
+        if not options.sequence:
+            # the standard case
+            length = (int(positionals[0])
+                      if len(positionals) >= 1
+                      else None)
+            if len(positionals) > 1:
+                warn("extra arguments dropped")
+            if length != None and length < 0:
+                raise Exception("negative creep")
+            config = settings(options.config, length)
+            if not options.dump:
+                print random_passphrase(**config)
+            else:
+                dump_settings(config)
+        else:
+            # the hairy case: there must be a config and it must
+            # specify a sequence of configs, including their lengths.
+            if not options.config:
+                raise Exception("no config given for concatenated passphrase")
+            if len(positionals) > 0:
+                warn("ignoring arguments")
+            config = json_settings(options.config, sequence=True)
+            if not options.dump:
+                print(u" ".join([random_passphrase(**c) for c in config]))
+            else:
+                dump_settings(config)
+    except Exception as e:
+        sys.exit("{0}: {1}".format(os.path.basename(sys.argv[0]), e))
+
+def random_passphrase(length=default_length,
+                      sources=default_sources,
+                      uniqueness=default_uniqueness,
+                      likelihoods=default_likelihoods,
+                      requirements=default_requirements,
+                      maxchars=default_maxchars):
+    """generate a random passphrase"""
+    if sum(requirements.values()) > length:
+        raise Exception("can't meet requirements")
+    if maxchars is not None:
+        if maxchars < length - 1: # too small for spaces even
+            raise Exception("maxchars is ridiculously small")
+        elif maxchars < 2 * length - 1: # too small for single-char words
+            raise Exception("maxchars is stupidily small")
+        elif maxchars == 2 * length - 1: # single-char words only
+            warn("maxchars is extremely small")
+        elif maxchars < 4 * length - 1: # words of 3 chars on average
+            warn("maxchars is alarmingly small")
+        elif maxchars < 6 * length - 1: # words of 5 chars on average
+            warn("maxchars is worryingly small")
+
+    # it annoys me to do this so late
+    wordlists = snarf_wordlists(sources, uniqueness)
+
+    gen = random.SystemRandom()
+    buckets = [c for (c, l) in likelihoods.iteritems()]
+
+    good = False
+    while not good:
+        p = range(length)
+        counts = {}
+        for i in p:
+            b = buckets[gen.randint(0, len(buckets) - 1)]
+            w = wordlists[b][gen.randint(0, len(wordlists[b]) - 1)]
+            p[i] = w
+            counts[b] = counts[b] + 1 if b in counts else 1
+
+        good = True
+        for (r, v) in requirements.iteritems():
+            # only check requirements when they are > 0!
+            if v > 0 and (r not in counts or counts[r] < v):
+                good = False
+
+        # Reject passphrases which will be too long as strings: it
+        # would be significantly better to do this much earlier (for
+        # instance if maxchars is 10 and the first word is 11 chars we
+        # could stop then, or we could even arrange the wordlists by
+        # length so we never even consider impossible words).  Doing
+        # that would make a big difference in the number of attempts
+        # needed to generate marginally-possible passphrases, but
+        # that's a bad idea anyway because they have hardly any
+        # randomness, so it doesn't seem worth the candle.
+        if (maxchars is not None
+            and sum(len(w) for w in p) + length - 1 > maxchars):
+            good = False
+
+    return u" ".join(p)
+
+def snarf_wordlists(sources, uniqueness):
+    """grab wordlists corresponding to the sources"""
+    # Return a dict mapping from names to wordlists.  If the source
+    # wants uniquness, then the wordlist is the list of unique
+    # words in the source, in hash order.  If it doesn't then it is
+    # all the words in the source, in the order found.  Throw an
+    # exception if no files could be found for a source (or read,
+    # implicitly)
+
+    def snarf(f, words, uniquely):
+        # add a file into a list of words
+        with open(f, 'r') as h:
+            for line in h:
+                for word in line.split():
+                    if uniquely:
+                        words.add(word)
+                    else:
+                        words.append(word)
+        return words
+
+    def snarf_one_list(name, files, uniquely):
+        # Snarf a list of files, returning a list of the words in all
+        # the files in order.  This is just a list: duplicates are not
+        # removed.
+        words = set() if uniquely else list()
+        found = False
+        for f in files:
+            if path.exists(f):
+                snarf(f, words, uniquely)
+                found = True
+        if found:
+            note("{0}: {1} {2}", name, len(words),
+                 "unique words" if uniquely else "words")
+            return list(words) if uniquely else words
+        else:
+            raise Exception("{0} - no words from {1}".format(name, files))
+
+    # Python 2.6 doesn't have dict comprehensions
+    return dict((name, snarf_one_list(name, files, uniqueness[name]))
+                for (name, files) in sources.iteritems())
+
+def settings(source, length):
+    """return a dict of settings which random_password can eat"""
+    # This is called to get the settings in the normal case
+    if source:
+        return json_settings(source, length=length,
+                             fallback_length=default_length)
+    else:
+        return {"length": length if length else default_length,
+                "sources": default_sources,
+                "uniqueness": default_uniqueness,
+                "likelihoods": default_likelihoods,
+                "requirements": default_requirements,
+                "maxchars": default_maxchars}
+
+def json_settings(source, length=None, fallback_length=None, sequence=False):
+    """read settings from a JSON file, check and return them"""
+    # This function deals with reading either a configuration or a
+    # list of them: most of the work is done by
+    # canonicalise_json_settings below.
+    #
+    # length is the length from the command line, fallback_length is a
+    # fallback. Both can be None, and will be in the sequence case.
+    #
+    # This is called from toplevel in the sequence case
+
+    def puke(control, *args):
+        raise Exception("{0} - ".format(source) + control.format(*args))
+
+    with open(source, 'r') as jp:
+        raw = json.load(jp)
+
+    if (not sequence):
+        return canonicalise_json_settings(raw, length, fallback_length, source)
+    else:
+        if not isinstance(raw, list):
+            puke("expecting a list of configurations")
+        return [canonicalise_json_settings(r, None, None, source)
+                for r in raw]
+
+def canonicalise_json_settings(raw, length, fallback_length, source):
+    """check settings read from a file, and get them into a good form"""
+    # This function is where what's *in* a JSON config file is
+    # defined, and it's just fiddly and painful as it's doing a lot of
+    # checking.  It *should* be the case that if this returns it
+    # returns good data, but random_password checks a little more.
+    #
+    # This function checks one bunch of settings: this is either what
+    # was read from the file, or element of the list of configurations
+    # in the file.  What should be there is:
+    # - all the sources
+    # - optionally likelihoods for the sources, where missing entries
+    #   will be assumed to be 1
+    # - optionally requirements, defaulted to 0.
+    # - and optionally length, if we didn't get anything from the
+    #   command line
+
+    def puke(control, *args):
+        raise Exception("{0} - ".format(source) + control.format(*args))
+
+    def every(p, iterable):
+        # CL predicate, used once below
+        for e in iterable:
+            if not p(e):
+                return False
+        return True
+
+    if not isinstance(raw, dict):
+        puke("catastrophic JSON failure")
+
+    # Get a length.  Take length if given, else what was in the JSON,
+    # else the fallback if given, else die.
+    if length is None:
+        if u"length" in raw:
+            length = raw[u"length"]
+        elif fallback_length is not None:
+            length = fallback_length
+        else:
+            puke("failed to get a length")
+    if not isinstance(length, int):
+        puke("bogus length {0} in config", length)
+    if length < 0:
+        puke("negative creep")
+
+    sources = (raw[u"sources"]
+               if u"sources" in raw
+               else None)
+    uniqueness = (raw[u"uniqueness"]
+                if u"uniqueness" in raw
+                else {})
+    likelihoods = (raw[u"likelihoods"]
+                   if u"likelihoods" in raw
+                   else {})
+    maxchars = (raw[u"maxchars"]
+                if u"maxchars" in raw
+                else None)
+    if sources == None:
+        puke("no sources at all")
+    elif len(sources) == 0:
+        puke("empty source map")
+
+    # check sources: it needs to be a dict mapping strings to lists of
+    # strings, with all the strings being unicode
+    if not isinstance(sources, dict):
+        puke("sources isn't a dict?")
+    for (k, v) in sources.iteritems():
+        # I'm pretty sure that k does not need to be checked since
+        # JSON mandates it, but it can't hurt
+        if not (isinstance(k, unicode)
+                and isinstance(v, list)
+                and every(lambda e: isinstance(e, unicode), v)):
+            puke("bogus type for source {0}, value {1}", k, v)
+
+    # check and fix up uniqueness
+    if not isinstance(uniqueness, dict):
+        puke("uniqueness isn't a dict")
+    for (k, v) in uniqueness.iteritems():
+        if not (isinstance(k, unicode) and isinstance(v, bool)):
+            puke("bogus type for uniqueness {0}, value {1}", k, v)
+    # uniqueness defaulted below
+
+    # check and fix up likelihoods
+    if not isinstance(likelihoods, dict):
+        puke("likelihoods isn't a dict?")
+    for (k, v) in likelihoods.iteritems():
+        if not (isinstance(k, unicode) and isinstance(v, int)):
+            puke("bogus type for likelihood {0}, value {1}", k, v)
+        if v < 0:
+            puke("negative likelihood for {0}, value {1}", k, v)
+    # remaining likelihoods are defaulted below
+
+    if u"requirements" in raw:
+        # given requirements: sanity check and default missing to 0
+        requirements = raw[u"requirements"]
+        if not isinstance(requirements, dict):
+            puke("requirements isn't a dict")
+        for (k, v) in requirements.iteritems():
+            if not (isinstance(k, unicode) and isinstance(v, int)):
+                puke("bogus type for requirement {0}, value {1}", k, v)
+            # It is OK for a requirement to be negative, but we need
+            # the likelihood to be > 0 if the requirement is > 0
+            if v > 0 and k in likelihoods and likelihoods[k] == 0:
+                puke("likelihood for {0} is 0 but requirement is {1}", k, v)
+        # remaining requirements defaulted below
+
+    else:
+        # not given requirements at all: default to 1 for each source,
+        # unless the likelihood was given as 0
+        requirements = dict([(k, 1 if k in likelihoods and likelihoods[k]
+                                   else 0)
+                             for k in sources.keys()])
+
+    # default uniqueness to True, likelihoods to 1 and requirements to 0
+    for k in sources.keys():
+        if k not in uniqueness:
+            uniqueness[k] = True
+        if k not in likelihoods:
+            likelihoods[k] = 1
+        if k not in requirements:
+            requirements[k] = 0
+
+    # Don't let the user specify zero likelihoods for everything
+    if sum(likelihoods.values()) == 0:
+        puke("all likelihoods are zero")
+
+    # Check maxchars
+    if maxchars is not None:
+        if not (isinstance(maxchars, int) and maxchars > 0):
+            puke("maxchars given and not a positive integer")
+
+    # OK, we are done
+    return {"length": length,
+            "sources": sources,
+            "uniqueness": uniqueness,
+            "likelihoods": likelihoods,
+            "requirements": requirements,
+            "maxchars": maxchars}
+
+def dump_settings(settings, stream=sys.stdout):
+    json.dump(settings, stream, indent=1)
+    print >>stream, ""
+
+def warn(fmt, *args):
+    """just warn"""
+    print >>sys.stderr, fmt.format(*args)
+
+def note(fmt, *args):
+    """note something, if verbose"""
+    if verbose:
+        print >>sys.stderr, fmt.format(*args)
+
+# Run
+if __name__ == '__main__':
+    main()
