@@ -39,12 +39,19 @@ meeting each specification.  The specifications must include the
 lengths of the concatenated chunks, and you can't override these on
 the command line (because I was too lazy to implememt it).
 
+The `-w` option allows you to specify the 'whitespace' string which is
+used to join words in the passphrase.  By default this is a single
+space, but you can set it to be, for instance, `-` or `/` if you want
+passphrases to be joined by those characters.  In fact it can be any
+string.
+
 Wordlist files are read line-by-line and split on whitespace to yield
 a list of words. By default a set of unique words from each source is
 then accumulated, so the statistics of words in passphrases don't
 reflect those in the sources.  This can be turned off in configuration
 files, but be careful if you do so, as it makes passphrases easier to
-guess.  `-v` will cause it to report some statistics from the various sources
+guess.  `-v` will cause it to report some statistics from the various
+sources.
 
 The program detects if you give it requirements it can't meet (with
 the default configuration this is a passphrase of less than a single
@@ -62,6 +69,7 @@ probably be the same program: it isn't because I was too lazy to
 conditionalize some of the checks.
 
 subcision monovariant Acephala retecious
+
 """
 
 import sys
@@ -93,10 +101,13 @@ default_length = 4
 
 default_maxchars = None
 
+whitespace = u" "
+
 verbose = False
 
 def main():
     """The program"""
+    global verbose, whitespace
     parser = argparse.ArgumentParser(usage="%(prog)s [options] [length]")
     parser.add_argument("-c", "--config-file",
                         dest="config",
@@ -115,15 +126,19 @@ def main():
     parser.add_argument("-m", "--man",
                         action="store_true", dest="pydoc",
                         help="use pydoc to display the documentation")
+    parser.add_argument("-w", "--whitespace",
+                        action="store", nargs="?", dest="whitespace",
+                        type=unicode, default=whitespace,
+                        help="whitespace separator, default '{0}'"
+                        .format(whitespace))
     parser.add_argument("length", nargs="?", type=int, default=None,
                         help="length, default {0}".format(default_length))
-
     args = parser.parse_args()
     if args.pydoc:
         pydoc = "pydoc{0}.{1}".format(sys.version_info[0], sys.version_info[1])
         os.execlp(pydoc, pydoc, sys.argv[0])
-    global verbose
     verbose = args.verbose
+    whitespace = args.whitespace
 
     try:
         if not args.sequence:
@@ -144,7 +159,7 @@ def main():
                 warn("ignoring arguments")
             config = json_settings(args.config, sequence=True)
             if not args.dump:
-                print(u" ".join([random_passphrase(**c) for c in config]))
+                print(whitespace.join([random_passphrase(**c) for c in config]))
             else:
                 dump_settings(config)
     except Exception as e:
@@ -206,7 +221,7 @@ def random_passphrase(length=default_length,
             and sum(len(w) for w in p) + length - 1 > maxchars):
             good = False
 
-    return u" ".join(p)
+    return whitespace.join(p)
 
 def snarf_wordlists(sources, uniqueness):
     """grab wordlists corresponding to the sources"""

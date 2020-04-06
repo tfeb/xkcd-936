@@ -67,6 +67,7 @@ where `length` is the length of the passphrase, which is 4 by default.  The poss
 - `-h` / `--help`: print a help message including all the options.
 - `-m` / `--man`: use `pydoc` to format the documentation in the program.  This may not work if `pydoc` is not installed or if something else goes wrong.
 - `-c <config>` / `--config <config>`: read a JSON configuration file (see below).
+- `-w <whitespace>` / `--whitespace <whitespace>`: specify the 'whitespace' string which is which is used to join words in the passphrase.  By default this is a single space, but you can set it to be, for instance, `-` or `/` if you want passphrases to be joined by those characters.  In fact it can be any string.
 - `-d` / `--dump`: dump the current effective configuration in JSON.  Does not generate a passphrase.
 - `-s` / `--sequence`: use a special listy configuration to generate concatenated passphrases.  Don't use this unless you know what it does!
 - `-v` / `--verbose`: be more verbose, and in particular print the dictionary size.
@@ -112,6 +113,15 @@ subordinating rollerer resink centralism Opisthoparia carcinomatosis improgressi
 ```
 
 The words you get are a random selection from what is in the sources.  There may therefore be repeats although for large sources and relatively short passphrases this is unlikely.
+
+Some systems don't like spaces in passphrases, so the `-w <whitespace>` option lets you select some other character:
+
+```
+$ random-passphrase -w '/'
+butylene/pyxis/picksman/unaired
+```
+
+This option currently can't be stored in a configuration, because I'm not sure it's useful for it to be in one.
 
 ### `random-password`
 This works in a similar way to `random-passphrase` except that it picks passwords from alphabets you give it.  To use it run it as
