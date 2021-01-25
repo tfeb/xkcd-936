@@ -1,4 +1,4 @@
-# xkcd-936: random passphrases
+# [xkcd-936: random passphrases](https://github.com/tfeb/xkcd-936)
 [xkcd 936](https://www.xkcd.com/936/) famously pointed out that *passwords* (relatively short concatenations of characters) very often fall into one of three categories:
 
 - easy for a human to remember and very easy for a machine to guess;
